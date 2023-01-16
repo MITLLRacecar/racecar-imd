@@ -130,7 +130,7 @@ def update():
     if isDriving:
         counter += rc.get_delta_time()
         if shape == 1: ##circle
-            if counter < 6:
+            if counter < 5.2:
                 rc.drive.set_speed_angle(1, 1)
             elif counter < 6.5:
                 rc.drive.set_speed_angle(0, 1)
@@ -140,11 +140,13 @@ def update():
 
         if shape == 2: #square
             if turns < 4:
-                if counter < 1:
+                if counter < 1.15:
                     rc.drive.set_speed_angle(1, 0)
-                elif counter < 2.63:
-                    rc.drive.set_speed_angle(1, 1)
-                elif counter < 4.13:
+                elif counter < 1.4:
+                    rc.drive.stop()
+                elif counter < 3.8:
+                    rc.drive.set_speed_angle(0.5, 1)
+                elif counter < 4.8:
                     rc.drive.stop()
                 else:
                     counter = 0
@@ -154,18 +156,31 @@ def update():
                 isDriving = False
 
         if shape == 3: #figure eight
-            if turns < 2:
-                if counter < 4.25:
-                    if turns == 0:
+            if turns == 0:
+                if counter < 2.8:
+                    rc.drive.set_speed_angle(1, 0)
+                elif counter < 4:
+                    rc.drive.stop()
+                else:
+                    counter = 0
+                    turns += 1
+            elif turns < 3:
+                if counter < 4.2:
+                    if turns == 1:
                         rc.drive.set_speed_angle(1, 1)
                     else:
-                        rc.drive.set_speed_angle(1, -1)
-                elif counter < 6.25:
+                        rc.drive.set_speed_angle(0.6, -1)
+                elif counter < 5.6:
                     rc.drive.stop()
-                elif counter < 10.5:
+                    if turns == 2:
+                        counter = 0
+                        turns += 1
+                elif counter < 7.7:
                     rc.drive.set_speed_angle(1, 0)
-                elif counter < 12.5:
+                elif counter < 11.2:
                     rc.drive.stop()
+                    counter = 0
+                    turns += 1
                 else:
                     counter = 0
                     turns += 1
@@ -195,4 +210,3 @@ def update():
 if __name__ == "__main__":
     rc.set_start_update(start, update)
     rc.go()
-    
