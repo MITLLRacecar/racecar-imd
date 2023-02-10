@@ -34,6 +34,8 @@ CROP_FLOOR = ((360, 0), (rc.camera.get_height(), rc.camera.get_width()))
 # Colors, stored as a pair (hsv_min, hsv_max)
 BLUE = ((90, 50, 50), (120, 255, 255))  # The HSV range for the color blue
 # TODO (challenge 1): add HSV ranges for other colors
+RED = ((0, 50, 50), (10, 255, 255))
+GREEN = ((36, 50, 50), (86, 255, 255))
 
 # >> Variables
 speed = 0.0  # The current speed of the car
@@ -67,26 +69,93 @@ def update_contour():
         image = rc_utils.crop(image, CROP_FLOOR[0], CROP_FLOOR[1])
 
         # Find all of the blue contours
-        contours = rc_utils.find_contours(image, BLUE[0], BLUE[1])
+        contours_red = rc_utils.find_contours(image, RED[0], RED[1])
+        contours_green = rc_utils.find_contours(image, GREEN[0], GREEN[1])
+        contours_blue = rc_utils.find_contours(image, BLUE[0], BLUE[1])
 
         # Select the largest contour
-        contour = rc_utils.get_largest_contour(contours, MIN_CONTOUR_AREA)
+        contour_red = rc_utils.get_largest_contour(contours_red, MIN_CONTOUR_AREA)
+        contour_green = rc_utils.get_largest_contour(contours_green, MIN_CONTOUR_AREA)
+        contour_blue = rc_utils.get_largest_contour(contours_blue, MIN_CONTOUR_AREA)
 
-        if contour is not None:
+        if contour_red is not None:
             # Calculate contour information
-            contour_center = rc_utils.get_contour_center(contour)
-            contour_area = rc_utils.get_contour_area(contour)
+            contour_center = rc_utils.get_contour_center(contour_red)
+            contour_area = rc_utils.get_contour_area(contour_red)
 
             # Draw contour onto the image
-            rc_utils.draw_contour(image, contour)
+            rc_utils.draw_contour(image, contour_red)
             rc_utils.draw_circle(image, contour_center)
+        elif contour_green is not None:
+            # Calculate contour information
+            contour_center = rc_utils.get_contour_center(contour_green)
+            contour_area = rc_utils.get_contour_area(contour_green)
 
+            # Draw contour onto the image
+            rc_utils.draw_contour(image, contour_green)
+            rc_utils.draw_circle(image, contour_center)
+        elif contour_blue is not None:
+            # Calculate contour information
+            contour_center = rc_utils.get_contour_center(contour_blue)
+            contour_area = rc_utils.get_contour_area(contour_blue)
+
+            # Draw contour onto the image
+            rc_utils.draw_contour(image, contour_blue)
+            rc_utils.draw_circle(image, contour_center)
         else:
             contour_center = None
             contour_area = 0
 
         # Display the image to the screen
         rc.display.show_color_image(image)
+
+def remap_range(
+    val: float,
+    old_min: float,
+    old_max: float,
+    new_min: float,
+    new_max: float,
+) -> float:
+    """
+    Remaps a value from one range to another range.
+
+    Args:
+        val: A number form the old range to be rescaled.
+        old_min: The inclusive 'lower' bound of the old range.
+        old_max: The inclusive 'upper' bound of the old range.
+        new_min: The inclusive 'lower' bound of the new range.
+        new_max: The inclusive 'upper' bound of the new range.
+
+    Note:
+        min need not be less than max; flipping the direction will cause the sign of
+        the mapping to flip.  val does not have to be between old_min and old_max.
+    """
+    # TODO: remap val to the new range
+    old_span: float = old_max - old_min
+    new_span: float = new_max - new_min
+    new_val: float = new_min + new_span * (float(val - old_min) / float(old_span))
+    
+    return new_val
+
+def clamp(value: float, vmin: float, vmax: float) -> float:
+    """
+    Clamps a value between a minimum and maximum value.
+
+    Args:
+        value: The input to clamp.
+        vmin: The minimum allowed value.
+        vmax: The maximum allowed value.
+
+    Returns:
+        The value saturated between vmin and vmax.
+    """
+    # TODO: Make sure that value is between min and max
+    if(value < vmin):
+        return vmin
+    elif(value > vmax):
+        return vmax
+    else:
+        return value
 
 
 def start():
@@ -134,10 +203,19 @@ def update():
     if contour_center is not None:
         # Current implementation: bang-bang control (very choppy)
         # TODO (warmup): Implement a smoother way to follow the line
+        DESIRED_DIST = rc.camera.get_width() / 2
+        current_dist = contour_center[1] 
+
+        angle = remap_range(current_dist, 0, rc.camera.get_width(), -1, 1)
+
+        """
+        #Default Code
         if contour_center[1] < rc.camera.get_width() / 2:
             angle = -1
         else:
             angle = 1
+        """
+        
 
     # Use the triggers to control the car's speed
     forwardSpeed = rc.controller.get_trigger(rc.controller.Trigger.RIGHT)
