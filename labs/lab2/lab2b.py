@@ -13,6 +13,7 @@ Lab 2B - Color Image Cone Parking
 import sys
 import cv2 as cv
 import numpy as np
+import matplotlib.pyplot as plt
 
 sys.path.insert(1, "../../library")
 import racecar_core
@@ -37,10 +38,25 @@ angle = 0.0  # The current angle of the car's wheels
 contour_center = None  # The (pixel row, pixel column) of contour
 contour_area = 0  # The area of contour
 
+x = np.array([40, 80, 120, 160, 200])
+y = np.array([17882.0, 4738.0, 2276.5, 1293.0, 825.0])
+
+plt.plot(x, y)
+# plt.show()
+
+
 ########################################################################################
 # Functions
 ########################################################################################
 
+
+# data = [
+#     (180.9, 1010.5),
+#     (121.3, 2331),
+#     (63.6, 7863),
+#     (49.6, 12007),
+#     (37.2, 20252)
+# ]
 
 def update_contour():
     """
@@ -78,6 +94,53 @@ def update_contour():
         # Display the image to the screen
         rc.display.show_color_image(image)
 
+def remap_range(
+    val: float,
+    old_min: float,
+    old_max: float,
+    new_min: float,
+    new_max: float,
+) -> float:
+    """
+    Remaps a value from one range to another range.
+
+    Args:
+        val: A number form the old range to be rescaled.
+        old_min: The inclusive 'lower' bound of the old range.
+        old_max: The inclusive 'upper' bound of the old range.
+        new_min: The inclusive 'lower' bound of the new range.
+        new_max: The inclusive 'upper' bound of the new range.
+
+    Note:
+        min need not be less than max; flipping the direction will cause the sign of
+        the mapping to flip.  val does not have to be between old_min and old_max.
+    """
+    # TODO: remap val to the new range
+    old_span: float = old_max - old_min
+    new_span: float = new_max - new_min
+    new_val: float = new_min + new_span * (float(val - old_min) / float(old_span))
+    
+    return new_val
+
+def clamp(value: float, vmin: float, vmax: float) -> float:
+    """
+    Clamps a value between a minimum and maximum value.
+
+    Args:
+        value: The input to clamp.
+        vmin: The minimum allowed value.
+        vmax: The maximum allowed value.
+
+    Returns:
+        The value saturated between vmin and vmax.
+    """
+    # TODO: Make sure that value is between min and max
+    if(value < vmin):
+        return vmin
+    elif(value > vmax):
+        return vmax
+    else:
+        return value
 
 def start():
     """
@@ -112,6 +175,34 @@ def update():
     update_contour()
 
     # TODO: Park the car 30 cm away from the closest orange cone
+    if contour_center is not None:
+        DESIRED_DIST = rc.camera.get_width() / 2
+        current_dist_1 = contour_center[1] 
+
+        angle = remap_range(current_dist_1, 0, rc.camera.get_width(), -1, 1)
+    
+
+    if contour_center is not None:
+        DESIRED_DIST = 27400
+        current_dist = (contour_area/20000000)**(1/-1.901)
+
+        maxSpeed = remap_range(current_dist, 32.08, 200, 0, 1)
+
+        if(current_dist >= 32.08):
+            speed = remap_range(current_dist, 32.08, 200, 0, 1)
+        else:
+            speed = remap_range(current_dist, 15, 32.08, -1, 0)
+        print(speed)
+        speed = clamp(speed, -1, 1)
+        
+        if((contour_area > 27300 and contour_area < 27500)):
+            speed = 0
+
+    if(current_dist_1 < rc.camera.get_width() / 4 or current_dist_1 > rc.camera.get_width() - (rc.camera.get_width() / 4)):
+        angle = -angle
+        speed = -speed
+
+    rc.drive.set_speed_angle(speed, angle)
 
     # Print the current speed and angle when the A button is held down
     if rc.controller.is_down(rc.controller.Button.A):
