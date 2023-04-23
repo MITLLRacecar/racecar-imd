@@ -24,9 +24,9 @@ import racecar_utils as rc_utils
 ########################################################################################
 
 class State:
-    mode = 'line'
+    mode = 'slalom'
     color = None
-    turn = 0
+    turn = None
 
 class Orientation(Enum):
     UP = 0
@@ -37,12 +37,13 @@ class Orientation(Enum):
 rc = racecar_core.create_racecar()
 
 # Add any global variables here
+KERNEL_SIZE = (5, 5)
 HEIGHT = rc.camera.get_height()
 WIDTH = rc.camera.get_width()
 CROP_FLOOR = ((360, 0), (HEIGHT, WIDTH))
 CROP_RIGHT = ((0, int(WIDTH/2)), (HEIGHT, WIDTH))
 CROP_LEFT = ((0, 0), (HEIGHT, int(WIDTH/2)))
-MIN_CONTOUR_AREA = 30
+MIN_CONTOUR_AREA = 1
 state = State()
 image = None
 depth_image = None
@@ -51,10 +52,11 @@ speed = 0.0
 angle = 0.0
 contour_center = None
 contour = None
+max_depth = 400
 
 colors = {
     'ORANGE': ((10, 50, 50), (20, 255, 255)),
-    'BLUE': ((100, 150, 50), (110, 255, 255)),
+    'BLUE': ((100, 150, 150), (130, 255, 255)),
     'GREEN': ((40, 50, 50), (80, 255, 255)),
     'RED': ((170, 50, 50), (10, 255, 255)),
     'PURPLE': ((110,59,50), (165,255,255))
@@ -75,6 +77,8 @@ def collect_data():
     global image, depth_image, scan
     image = rc.camera.get_color_image()
     depth_image = rc.camera.get_depth_image()
+    depth_image = (depth_image - 0.01) % 10000
+    depth_image = cv.GaussianBlur(depth_image, KERNEL_SIZE, 0)
     scan = rc.lidar.get_samples()
 
 def set_state():
@@ -122,6 +126,7 @@ def set_state():
                     if color == 'not detected':
                         state.mode = 'slalom'
                         state.color = None
+                        state.turn  = None
                     else:
                         state.mode = 'line'
                         state.color = color
@@ -129,17 +134,8 @@ def set_state():
                     state.mode = 'wall'
                     state.color = None
 
-
-def print_errors():
-    if image is None:
-        print('Error: Color image')
-    if depth_image is None:
-        print('Error: Depth image')
-    if scan is None:
-        print('Error: Lidar scan')
-
-def prepare_line():
-    global image, depth_image, contour_center, contour
+def follow_line():
+    global image, depth_image, contour_center, contour, speed, angle
     image_copy = image
 
     image_copy = rc_utils.crop(image, CROP_FLOOR[0], CROP_FLOOR[1])
@@ -228,135 +224,164 @@ def prepare_line():
             state.color = 'BLUE'
         
         state.turn = 0
-
-def prepare_lane():
-    global image, depth_image, contour_center, contour
-
-    image_left = rc_utils.crop(image, (int(HEIGHT/2), 0), (HEIGHT, int(WIDTH/2)))
-    image_right = rc_utils.crop(image, (int(HEIGHT/2), int(WIDTH/2)), (HEIGHT, WIDTH))
-    # Swift turn
-
-    contours_orange_left = rc_utils.find_contours(image_left, colors['ORANGE'][0], colors['ORANGE'][1])
-    contours_orange_right = rc_utils.find_contours(image_right, colors['ORANGE'][0], colors['ORANGE'][1])
-    contours_purple_left = rc_utils.find_contours(image_left, colors['PURPLE'][0], colors['PURPLE'][1])
-    contours_purple_right = rc_utils.find_contours(image_right, colors['PURPLE'][0], colors['PURPLE'][1])
-
-    contour_orange_left = rc_utils.get_largest_contour(contours_orange_left, MIN_CONTOUR_AREA)
-    contour_orange_right = rc_utils.get_largest_contour(contours_orange_right, MIN_CONTOUR_AREA)
-    contour_purple_left = rc_utils.get_largest_contour(contours_purple_left, MIN_CONTOUR_AREA)
-    contour_purple_right = rc_utils.get_largest_contour(contours_purple_right, MIN_CONTOUR_AREA)
-
-    contour_center_orange_left = rc_utils.get_contour_center(contour_orange_left)
-    contour_center_orange_right = rc_utils.get_contour_center(contour_orange_right)
-    contour_center_purple_left = rc_utils.get_contour_center(contour_purple_left)
-    contour_center_purple_right = rc_utils.get_contour_center(contour_purple_right)
-
-    # print(contours_orange)
-
-    if state.color == 'ORANGE' and contour_orange_left is not None and contour_orange_right is not None:
-
-        row = int((contour_center_orange_left[0] + contour_center_orange_right[0]) / 2)
-        column = int((contour_center_orange_left[1] + contour_center_orange_right[1] + WIDTH / 2) / 2)
-
-        contour_center = [row, column]
-
-        contour_center[0] = rc_utils.clamp(contour_center[0], 0, HEIGHT-1)
-        contour_center[1] = rc_utils.clamp(contour_center[1], 0, WIDTH-1)
-
-        contour_center = tuple(contour_center)
-
-        if contour_purple_left is not None and contour_purple_right is not None:
-            distance_left = depth_image[contour_center_purple_left[0]][contour_center_purple_left[1]]
-            distance_right = depth_image[contour_center_purple_right[0]][contour_center_purple_right[1]]
-
-            if distance_left < 10 and distance_right < 10:
-                state.color = 'PURPLE'
-
-        # rc_utils.draw_circle(image_copy, contour_center)
     
-        # rc_utils.draw_contour(image_copy, contour_1)
-        # rc_utils.draw_circle(image_copy, contour_center_1)
-
-        # rc_utils.draw_contour(image_copy, contour_2)
-        # rc_utils.draw_circle(image_copy, contour_center_2)
-
-    elif state.color == 'PURPLE' and contour_purple_left is not None and contour_purple_right is not None:
-
-        row = int((contour_center_purple_left[0] + contour_center_purple_right[0]) / 2)
-        column = int((contour_center_purple_left[1] + contour_center_purple_right[1] + WIDTH / 2) / 2)
-
-        contour_center = [row, column]
-
-        contour_center[0] = rc_utils.clamp(contour_center[0], 0, HEIGHT-1)
-        contour_center[1] = rc_utils.clamp(contour_center[1], 0, WIDTH-1)
-
-        contour_center = tuple(contour_center)
-
-        if contour_orange_left is not None and contour_orange_right is not None:
-            distance_left = depth_image[contour_center_orange_left[0]][contour_center_orange_left[1]]
-            distance_right = depth_image[contour_center_orange_right[0]][contour_center_orange_right[1]]
-
-            if distance_left < 10 and distance_right < 10:
-                state.color = 'ORANGE'
-
-        # rc_utils.draw_circle(image, contour_center)
-    
-
-    rc.display.show_color_image(image)
-
-
-
-def prepare_slalom():
-    pass
-
-def prepare_wall():
-    pass
-
-def prepare_data():
-    if state.mode == 'line':
-        prepare_line()
-    elif state.mode == 'lane':
-        prepare_lane()
-    elif state.mode == 'slalom':
-        pass
-    elif state.mode == 'wall':
-        pass
-
-def get_speed():
-    global speed, contour_center
-    if state.mode == 'line':
-        if contour_center is not None:
+    if contour_center is not None:
             distance = abs(WIDTH/2 - contour_center[1])
             speed = rc_utils.remap_range(distance, 0, WIDTH/2, 1, 0.5)
 
             speed = rc_utils.clamp(speed, -1, 1)
-    elif state.mode == 'lane':
-        speed = 1
-    elif state.mode == 'slalom':
-        pass
-    elif state.mode == 'wall':
-        pass
 
-def get_angle():
-    global angle, contour_center
-    if state.mode == 'line':
-        if contour_center is not None:
+    if contour_center is not None:
             angle = rc_utils.remap_range(contour_center[1], 0, WIDTH, -1, 1)
 
             angle = rc_utils.clamp(angle, -1, 1)
-    elif state.mode == 'lane':
-        if contour_center is not None:
+
+def follow_lane():
+    global image, depth_image, contour_center, contour, speed, angle
+
+    if abs(state.turn < 2):
+        image_left = rc_utils.crop(image, (int(HEIGHT*2/3), 0), (HEIGHT, int(WIDTH/2)))
+        image_right = rc_utils.crop(image, (int(HEIGHT*2/3), int(WIDTH/2)), (HEIGHT, WIDTH))
+
+        contours_left = rc_utils.find_contours(image_left, colors[state.color][0], colors[state.color][1])
+        contours_right = rc_utils.find_contours(image_right, colors[state.color][0], colors[state.color][1])
+
+        contour_left = rc_utils.get_largest_contour(contours_left, MIN_CONTOUR_AREA)
+        contour_right = rc_utils.get_largest_contour(contours_right, MIN_CONTOUR_AREA)
+
+        contour_center_left = rc_utils.get_contour_center(contour_left)
+        contour_center_right = rc_utils.get_contour_center(contour_right)
+
+        if contour_center_left is not None and contour_center_right is not None:
+            row = int((contour_center_left[0] + HEIGHT * 2/3 + contour_center_right[0] + HEIGHT * 2/3) / 2)
+            column = int((contour_center_left[1] + contour_center_right[1] + WIDTH / 2) / 2)
+
+            contour_center = (row, column)
+
+            # image_copy = rc_utils.draw_contour(image_copy, contour)
+            rc_utils.draw_circle(image, contour_center)
+            rc.display.show_color_image(image)
+
+        else:
+            # state.color not detected
+            image_copy = rc_utils.crop(image, (int(HEIGHT*2/3), 0), (HEIGHT, int(WIDTH)))
+            if state.color == 'ORANGE':
+                contours = rc_utils.find_contours(image_copy, colors['PURPLE'][0], colors['PURPLE'][1])
+            elif state.color == 'PURPLE':
+                contours = rc_utils.find_contours(image_copy, colors['ORANGE'][0], colors['ORANGE'][1])
+            
+            contour = rc_utils.get_largest_contour(contours, MIN_CONTOUR_AREA)
+
+            if contour is not None:
+                contour_center_temp = rc_utils.get_contour_center(contour)
+                if image_copy is not None:
+                    rc_utils.draw_contour(image_copy, contour)
+                    rc_utils.draw_circle(image_copy, contour_center_temp)
+                    rc.display.show_color_image(image_copy)
+                if contour_center_temp[1] < WIDTH/2:
+                    state.turn = 2
+                else:
+                    state.turn = -2
+            else:
+                state.turn = 0
+    
+    speed = 1
+
+    if contour_center is not None:
             angle = rc_utils.remap_range(contour_center[1], 0, WIDTH, -1, 1)
             if state.turn != 0:
-                angle = 0.1 * state.turn
-                state.turn = 0
+                if abs(state.turn == 2): # Sharp turn
+                    angle = 1/2 * state.turn
+                else:
+                    angle = 0.1 * state.turn
+                    state.turn = 0
 
             angle = rc_utils.clamp(angle, -1, 1)
-    elif state.mode == 'slalom':
-        pass
-    elif state.mode == 'wall':
-        pass
-            
+
+def cone_slalom():
+    global image, depth_image, scan, contour_center, contour, speed, angle
+
+    if image is None or depth_image is None or scan is None:
+        print("image error")
+
+    # Find next cone color
+    if state.color is None:
+        contours_red = rc_utils.find_contours(image, colors['RED'][0], colors['RED'][1])
+        contours_blue = rc_utils.find_contours(image, colors['BLUE'][0], colors['BLUE'][1])
+
+        contour_red = rc_utils.get_largest_contour(contours_red, MIN_CONTOUR_AREA)
+        rc_utils.draw_contour(image, contour_red) if contour_red is not None else None
+        contour_blue = rc_utils.get_largest_contour(contours_blue, MIN_CONTOUR_AREA)
+        rc_utils.draw_contour(image, contour_blue) if contour_blue is not None else None
+
+        # contour_area_red = rc_utils.get_contour_area(contour_red) if contour_red is not None else None
+        # contour_area_blue = rc_utils.get_contour_area(contour_blue) if contour_blue is not None else None
+
+        contour_center_red = rc_utils.get_contour_center(contour_red) if contour_red is not None else None
+        contour_center_blue = rc_utils.get_contour_center(contour_blue) if contour_blue is not None else None
+
+        cone_distance_red = depth_image[contour_center_red[0]][contour_center_red[1]] if contour_center_red is not None else None
+        cone_distance_blue = depth_image[contour_center_blue[0]][contour_center_blue[1]] if contour_center_blue is not None else None
+
+        if (cone_distance_red is None and cone_distance_blue is not None) or (cone_distance_blue is not None and cone_distance_blue < cone_distance_red):
+            contour_center = rc_utils.get_contour_center(contour_blue)
+            state.color = 'BLUE'
+
+        if (cone_distance_blue is None and cone_distance_red is not None) or (cone_distance_red is not None and cone_distance_red < cone_distance_blue):
+            contour_center = rc_utils.get_contour_center(contour_red)
+            state.color = 'RED'
+
+    elif state.turn == 0: # Pass cone
+        angle = 0
+        speed = 1
+
+        closest_cone = rc_utils.get_lidar_closest_point(scan)
+        if closest_cone[1] < 999999 and closest_cone[0] > 120 or closest_cone[0] < 240: # Recover
+            if state.color == 'RED':
+                angle = rc_utils.remap_range(closest_cone[1], 120, 240, -1, 0)
+            else:
+                angle = rc_utils.remap_range(closest_cone[1], 120, 240, 1, 0)
+            # angle = angle if state.color == 'BLUE' else -angle
+            state.color = None
+            state.turn = None
+
+    # Found cone color: Approach and turn
+    elif state.color is not None:
+        contours = rc_utils.find_contours(image, colors[state.color][0], colors[state.color][1])
+
+        contour = rc_utils.get_largest_contour(contours, MIN_CONTOUR_AREA)
+        rc_utils.draw_contour(image, contour) if contour is not None else None
+
+        contour_center = rc_utils.get_contour_center(contour) if contour is not None else None
+        # print(contour_center)
+
+        cone_distance = depth_image[contour_center[0]][contour_center[1]] if contour_center is not None else None
+
+        closest_cone = rc_utils.get_lidar_closest_point(scan)
+
+        if cone_distance is not None and cone_distance < 150:
+            angle = rc_utils.remap_range(contour_center[1], 0, WIDTH, -1, 1)
+            if state.color == 'RED':
+                # angle = rc_utils.remap_range(contour_center[1]+OFFSET, 0, WIDTH+OFFSET, -1, 1)
+                angle += rc_utils.remap_range(cone_distance, 20, 200, 1, 0)
+                state.turn = 1
+            if state.color == 'BLUE':
+                # angle = rc_utils.remap_range(contour_center[1]-OFFSET, 0-OFFSET, WIDTH, -1, 1)
+                angle -= rc_utils.remap_range(cone_distance, 20, 200, 1, 0)
+                state.turn = -1
+            angle = rc_utils.clamp(angle, -1, 1)
+        elif closest_cone[1] < 999999 and closest_cone[0] > 60 or closest_cone[0] < 300: # Cone not visible (next to cone)
+            print("BANANA")
+            state.turn = 0
+        else:
+            state.turn = None
+            angle = rc_utils.remap_range(contour_center[1], 0, WIDTH, -1, 1)
+            angle = rc_utils.clamp(angle, -1, 1)
+        
+        speed = 1
+
+    rc_utils.draw_circle(image, contour_center)
+    rc.display.show_color_image(image)
 
 def start():
     """
@@ -383,12 +408,14 @@ def update():
     set_state()
     print(f'Mode: {state.mode} | Color: {state.color} | Turn: {state.turn}')
 
-    print_errors()
-
-    prepare_data()
-
-    get_speed()
-    get_angle()
+    if state.mode == 'line':
+        follow_line()
+    elif state.mode == 'lane':
+        follow_lane()
+    elif state.mode == 'slalom':
+        cone_slalom()
+    elif state.mode == 'wall':
+        pass
 
     forwardSpeed = rc.controller.get_trigger(rc.controller.Trigger.RIGHT)
     backSpeed = rc.controller.get_trigger(rc.controller.Trigger.LEFT)
@@ -399,6 +426,7 @@ def update():
     if (turnAngle != 0):
         angle = turnAngle
 
+    angle = rc_utils.clamp(angle, -1, 1)
     rc.drive.set_speed_angle(speed, angle)
     # if image is not None:
     #     rc.display.show_color_image(image)
